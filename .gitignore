@@ -1,0 +1,20 @@
+# Python cache and virtualenv
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local virtual environments
+venv/
+.venv/
+api/venv/
+
+# OS and editor
+.DS_Store
+.vscode/
+.idea/

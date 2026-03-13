@@ -1,0 +1,11 @@
+fastapi==0.135.1
+uvicorn[standard]==0.41.0
+pydantic==2.12.5
+python-dotenv==1.1.1
+minio==7.2.20
+psycopg2-binary==2.9.10
+pymilvus==2.4.9
+httpx==0.28.1
+mlflow==2.22.0
+setuptools==80.9.0
+marshmallow==3.26.1

@@ -1,0 +1,155 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: adminpassword
+      POSTGRES_DB: tcc_logs_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio
+    restart: always
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: adminpassword
+    ports:
+      - "9000:9000"
+      - "9001:9001" 
+    volumes:
+      - minio_data:/data
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    restart: unless-stopped
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: >
+      etcd
+      -advertise-client-urls=http://etcd:2379
+      -listen-client-urls=http://0.0.0.0:2379
+      --data-dir=/etcd
+    volumes:
+      - etcd_data:/etcd
+
+  milvusminio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    restart: unless-stopped
+    command: server /minio_data --console-address ":9002"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9002:9002"
+    volumes:
+      - milvus_minio_data:/minio_data
+
+  milvus:
+    image: milvusdb/milvus:v2.4.13
+    restart: unless-stopped
+    depends_on:
+      - etcd
+      - milvusminio
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: milvusminio:9000
+      MQ_TYPE: rocksmq
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  mlflow:
+    image: python:3.12-slim
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - minio
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: adminpassword
+      AWS_DEFAULT_REGION: us-east-1
+    ports:
+      - "5000:5000"
+    command: >
+      bash -c "
+      pip install --no-cache-dir mlflow==2.22.0 psycopg2-binary==2.9.10 boto3==1.39.3 &&
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql+psycopg2://admin:adminpassword@postgres:5432/tcc_logs_db
+      --artifacts-destination s3://mlflow
+      "
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - minio
+      - milvus
+      - mlflow
+      - ollama
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      POSTGRES_DSN: postgresql://admin:adminpassword@postgres:5432/tcc_logs_db
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: admin
+      MINIO_SECRET_KEY: adminpassword
+      MINIO_SECURE: "false"
+      MINIO_BUCKET_BRONZE: logs-bronze
+      MINIO_BUCKET_SILVER: logs-silver
+      MILVUS_URI: http://milvus:19530
+      MILVUS_COLLECTION: docs_logs_context
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_CHAT_MODEL: llama3.2:3b
+      OLLAMA_EMBED_MODEL: nomic-embed-text
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_EXPERIMENT_NAME: aiops-diagnosis
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      API_BASE_URL: http://api:8000
+      GRADIO_SERVER_NAME: 0.0.0.0
+      GRADIO_SERVER_PORT: "7860"
+    ports:
+      - "7860:7860"
+
+volumes:
+  postgres_data:
+  minio_data:
+  etcd_data:
+  milvus_data:
+  milvus_minio_data:
+  ollama_data:
