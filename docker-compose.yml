@@ -3,24 +3,29 @@ services:
     image: postgres:15-alpine
     restart: always
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: adminpassword
-      POSTGRES_DB: tcc_logs_db
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-adminpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-tcc_logs_db}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-tcc_logs_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
 
   minio:
     image: minio/minio
     restart: always
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: adminpassword
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-adminpassword}
     ports:
-      - "9000:9000"
-      - "9001:9001" 
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
 
@@ -45,10 +50,10 @@ services:
     restart: unless-stopped
     command: server /minio_data --console-address ":9002"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MILVUS_MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MILVUS_MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - "9002:9002"
+      - "${MILVUS_MINIO_CONSOLE_PORT:-9002}:9002"
     volumes:
       - milvus_minio_data:/minio_data
 
@@ -64,8 +69,8 @@ services:
       MINIO_ADDRESS: milvusminio:9000
       MQ_TYPE: rocksmq
     ports:
-      - "19530:19530"
-      - "9091:9091"
+      - "${MILVUS_PORT:-19530}:19530"
+      - "${MILVUS_HEALTH_PORT:-9091}:9091"
     volumes:
       - milvus_data:/var/lib/milvus
 
@@ -73,7 +78,7 @@ services:
     image: ollama/ollama:latest
     restart: unless-stopped
     ports:
-      - "11434:11434"
+      - "${OLLAMA_PORT:-11434}:11434"
     volumes:
       - ollama_data:/root/.ollama
 
@@ -85,18 +90,18 @@ services:
       - minio
     environment:
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
-      AWS_ACCESS_KEY_ID: admin
-      AWS_SECRET_ACCESS_KEY: adminpassword
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-adminpassword}
       AWS_DEFAULT_REGION: us-east-1
     ports:
-      - "5000:5000"
+      - "${MLFLOW_PORT:-5000}:5000"
     command: >
       bash -c "
       pip install --no-cache-dir mlflow==2.22.0 psycopg2-binary==2.9.10 boto3==1.39.3 &&
       mlflow server
       --host 0.0.0.0
       --port 5000
-      --backend-store-uri postgresql+psycopg2://admin:adminpassword@postgres:5432/tcc_logs_db
+      --backend-store-uri postgresql+psycopg2://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-adminpassword}@postgres:5432/${POSTGRES_DB:-tcc_logs_db}
       --artifacts-destination s3://mlflow
       "
 
@@ -113,24 +118,29 @@ services:
       - ollama
     environment:
       API_HOST: 0.0.0.0
-      API_PORT: 8000
-      POSTGRES_DSN: postgresql://admin:adminpassword@postgres:5432/tcc_logs_db
+      API_PORT: ${API_PORT:-8000}
+      POSTGRES_DSN: postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-adminpassword}@postgres:5432/${POSTGRES_DB:-tcc_logs_db}
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: admin
-      MINIO_SECRET_KEY: adminpassword
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-adminpassword}
       MINIO_SECURE: "false"
-      MINIO_BUCKET_BRONZE: logs-bronze
-      MINIO_BUCKET_SILVER: logs-silver
+      MINIO_BUCKET_BRONZE: ${MINIO_BUCKET_BRONZE:-logs-bronze}
+      MINIO_BUCKET_SILVER: ${MINIO_BUCKET_SILVER:-logs-silver}
       MILVUS_URI: http://milvus:19530
-      MILVUS_COLLECTION: docs_logs_context
+      MILVUS_COLLECTION: ${MILVUS_COLLECTION:-docs_logs_context}
       OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_CHAT_MODEL: llama3.2:3b
-      OLLAMA_EMBED_MODEL: nomic-embed-text
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-llama3.2:3b}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
       MLFLOW_TRACKING_URI: http://mlflow:5000
-      MLFLOW_EXPERIMENT_NAME: aiops-diagnosis
+      MLFLOW_EXPERIMENT_NAME: ${MLFLOW_EXPERIMENT_NAME:-aiops-diagnosis}
       PYTHONUNBUFFERED: "1"
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
 
   frontend:
     build:
@@ -142,9 +152,9 @@ services:
     environment:
       API_BASE_URL: http://api:8000
       GRADIO_SERVER_NAME: 0.0.0.0
-      GRADIO_SERVER_PORT: "7860"
+      GRADIO_SERVER_PORT: "${GRADIO_PORT:-7860}"
     ports:
-      - "7860:7860"
+      - "${GRADIO_PORT:-7860}:7860"
 
 volumes:
   postgres_data:
